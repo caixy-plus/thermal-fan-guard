@@ -132,6 +132,25 @@ import Testing
   #expect(configuration.rules[0].recoveryTemperature == 58)
 }
 
+@Test func commandJSONRoundTrip() throws {
+  let encoder = JSONEncoder()
+  encoder.dateEncodingStrategy = .iso8601
+  encoder.outputFormatting = [.sortedKeys]
+  let original = GuardCommand(action: .max, issuedAt: Date(timeIntervalSince1970: 1_700_000_000), expiresAfter: 1800)
+  let data = try encoder.encode(original)
+  let decoded = try #require(GuardCommand.decodeForTesting(data))
+  #expect(decoded.action == .max)
+  #expect(decoded.expiresAfter == 1800)
+}
+
+@Test func commandDecodesWithoutFractionalSeconds() throws {
+  let json = """
+  {"action":"max","expiresAfter":1800,"issuedAt":"2026-07-06T12:42:21Z"}
+  """.data(using: .utf8)!
+  let decoded = try #require(GuardCommand.decodeForTesting(json))
+  #expect(decoded.action == .max)
+}
+
 @Test func commandExpiresAfterTimeout() {
   let command = GuardCommand(action: .max, issuedAt: Date(timeIntervalSince1970: 0), expiresAfter: 30)
   #expect(command.isExpired(at: Date(timeIntervalSince1970: 29)) == false)
@@ -146,6 +165,14 @@ import Testing
 
 @Test func decodesByExplicitDataType() {
   #expect(SMCTemperatureDecoder.decode(bytes: [0x2D, 0x80], size: 2, dataType: "sp78") == 45.5)
+}
+
+@Test func rejectsSp78MisdecodeBeforeTryingFpe2() {
+  #expect(SMCTemperatureDecoder.decode(bytes: [0x00, 0xF0], size: 2) == 60.0)
+}
+
+@Test func rejectsImplausibleLowTemperature() {
+  #expect(SMCTemperatureDecoder.decode(bytes: [0x00, 0x80], size: 2, dataType: "sp78") == nil)
 }
 
 @Test func overrideTimeoutZeroDoesNotExpire() {

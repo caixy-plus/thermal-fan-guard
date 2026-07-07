@@ -1,0 +1,11 @@
+---
+description: Release versioning — git tag is the single source of truth for version numbers
+alwaysApply: true
+---
+
+# Release versioning
+
+- **Git tag = version number**: push tag `vX.Y` (e.g. `v2.0`, `v2.0.1`) → version `X.Y` / `X.Y.Z`.
+- **CI trigger**: pushing a `v*` tag runs `.github/workflows/release.yml` → `swift test` → `./scripts/package-pkg.sh` → GitHub Release with `MyFans-<version>.pkg`.
+- **Do not** hardcode release versions in plists for CI builds; `scripts/set-version.sh` writes `VERSION` (from tag or env) into `ThermalFanGuardApp-Info.plist` and `MyFansInstaller-Info.plist` before packaging.
+- **Local release**: `git tag v2.0 && git push origin v2.0`, or `VERSION=2.0 ./scripts/package-pkg.sh` on an exact tag checkout.

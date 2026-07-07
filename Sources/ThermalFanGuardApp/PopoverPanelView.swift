@@ -92,19 +92,27 @@ struct PopoverPanelView: View {
 
   private var badge: some View {
     let text: String
-    if model.status?.override == "max" {
-      text = "加速 100%"
+    if model.pendingManualOverride == .max || model.status?.override == "max" {
+      text = model.pendingManualOverride == .max && model.status?.override != "max"
+        ? "全速中…"
+        : "加速 100%"
+    } else if model.pendingManualOverride == .auto {
+      text = "恢复中…"
     } else if let percent = model.status?.fanSpeedPercent {
       text = "加速 \(percent)%"
     } else {
       text = "自动"
     }
+    let boosted = text != "自动" && !text.hasSuffix("…")
+    let pending = text.hasSuffix("…")
     return Text(text)
       .font(.caption.weight(.semibold))
       .padding(.horizontal, 8)
       .padding(.vertical, 4)
-      .background((text == "自动" ? Color.secondary : Color.orange).opacity(0.18), in: Capsule())
-      .foregroundStyle(text == "自动" ? Color.secondary : Color.orange)
+      .background {
+        Capsule().fill(boosted ? Color.orange.opacity(0.18) : pending ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.18))
+      }
+      .foregroundStyle(boosted || pending ? Color.orange : Color.secondary)
   }
 
   private var chartSection: some View {
@@ -150,7 +158,46 @@ struct PopoverPanelView: View {
   }
 
   private var isFanBoosted: Bool {
-    model.status?.fanSpeedPercent != nil || model.status?.override == "max"
+    model.isMaxMode || model.pendingManualOverride == .max
+  }
+
+  private var actionSection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      if let error = model.manualOverrideError {
+        Text(error)
+          .font(.caption)
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      HStack {
+        PanelActionButton(
+          title: boostButtonTitle,
+          isEnabled: model.canIssueBoostToMax,
+          isProminent: true
+        ) {
+          model.boostToMax()
+        }
+
+        PanelActionButton(
+          title: restoreButtonTitle,
+          isEnabled: model.canIssueRestoreAutomatic
+        ) {
+          model.restoreAutomatic()
+        }
+      }
+    }
+  }
+
+  private var boostButtonTitle: String {
+    if model.pendingManualOverride == .max { return "全速中…" }
+    if model.isManualControlBusy { return "请稍候…" }
+    return "🚀 立即全速"
+  }
+
+  private var restoreButtonTitle: String {
+    if model.pendingManualOverride == .auto { return "恢复中…" }
+    if model.isManualControlBusy { return "请稍候…" }
+    return "↩︎ 恢复自动"
   }
 
   private var rulesSection: some View {
@@ -159,8 +206,7 @@ struct PopoverPanelView: View {
         .font(.subheadline.weight(.medium))
       ForEach(Array(model.configuration.sortedRules.enumerated()), id: \.element.id) { index, rule in
         Button {
-          openSettings()
-          NSApp.activate(ignoringOtherApps: true)
+          presentSettings()
         } label: {
           HStack {
             Text(ruleLine(index: index, rule: rule))
@@ -188,25 +234,10 @@ struct PopoverPanelView: View {
     return "\(marker) ≥\(Int(rule.triggerTemperature))° \(Int(rule.triggerDuration))s → \(rule.fanSpeedPercent)% (≤\(Int(rule.recoveryTemperature))° 解除)"
   }
 
-  private var actionSection: some View {
-    HStack {
-      Button("🚀 立即全速") {
-        model.boostToMax()
-      }
-      .disabled(!model.isDaemonOnline || model.hasSamplingError)
-
-      Button("↩︎ 恢复自动") {
-        model.restoreAutomatic()
-      }
-      .disabled(!model.isDaemonOnline || model.hasSamplingError)
-    }
-  }
-
   private var footerSection: some View {
     HStack {
       Button("设置…") {
-        openSettings()
-        NSApp.activate(ignoringOtherApps: true)
+        presentSettings()
       }
       .keyboardShortcut(",", modifiers: .command)
       Spacer()
@@ -216,5 +247,52 @@ struct PopoverPanelView: View {
       .keyboardShortcut("q", modifiers: .command)
     }
     .font(.caption)
+  }
+
+  private func presentSettings() {
+    MenuBarPanelCloser.closePopoverIfVisible()
+    openSettings()
+    NSApp.activate(ignoringOtherApps: true)
+  }
+}
+
+private struct PanelActionButton: NSViewRepresentable {
+  let title: String
+  let isEnabled: Bool
+  var isProminent: Bool = false
+  let action: () -> Void
+
+  func makeNSView(context: Context) -> NSButton {
+    let button = NSButton(title: title, target: context.coordinator, action: #selector(Coordinator.tapped))
+    button.bezelStyle = .rounded
+    button.keyEquivalent = ""
+    button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+    return button
+  }
+
+  func updateNSView(_ button: NSButton, context: Context) {
+    button.title = title
+    button.isEnabled = isEnabled
+    if isProminent {
+      button.bezelColor = .controlAccentColor
+      button.contentTintColor = .white
+    }
+    context.coordinator.action = action
+  }
+
+  func makeCoordinator() -> Coordinator {
+    Coordinator(action: action)
+  }
+
+  final class Coordinator: NSObject {
+    nonisolated(unsafe) var action: () -> Void = {}
+
+    init(action: @escaping () -> Void) {
+      self.action = action
+    }
+
+    @objc func tapped() {
+      action()
+    }
   }
 }

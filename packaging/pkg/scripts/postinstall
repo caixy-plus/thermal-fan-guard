@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+
+LABEL="com.caixinyun.thermal-fan-guard"
+PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+OLD_APP="/Applications/Thermal Fan Guard.app"
+
+launchctl bootout system "$PLIST" 2>/dev/null || true
+launchctl bootstrap system "$PLIST"
+launchctl enable "system/${LABEL}"
+
+if [[ -d "$OLD_APP" ]]; then
+  rm -rf "$OLD_APP"
+fi
+
+exit 0

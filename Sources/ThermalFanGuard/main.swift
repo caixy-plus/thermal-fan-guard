@@ -1,37 +1,10 @@
 import Darwin
 import Foundation
-import SMCFanKit
-import SMCKit
 import ThermalFanGuardCore
 
 func log(_ message: String) {
   print("\(ISO8601DateFormatter().string(from: Date())) \(message)")
   fflush(stdout)
-}
-
-func probe() throws {
-  let out = URL(fileURLWithPath: "/tmp/thermal-fan-guard-probe.txt")
-  var lines: [String] = []
-  let hardware = try ThermalHardware()
-  let connection = try SMCConnection()
-  let sensors = SensorCatalog.keysForCurrentHardware().filter { $0.type == .temperature }
-  lines.append("sensors=\(sensors.count)")
-  var hits = 0
-  for sensor in sensors {
-    if let (bytes, size) = try? connection.readKey(sensor.key) {
-      let decoded = SMCTemperatureDecoder.decode(bytes: bytes, size: size)
-      let fpe2 = size == 2 ? Double(SMCDataFormat.uint16(from: bytes)) / 4.0 : -1
-      lines.append("\(sensor.key) size=\(size) bytes=\(bytes.map { String(format: "%02X", $0) }.joined()) dec=\(decoded.map { String(format: "%.1f", $0) } ?? "nil") fpe2=\(fpe2)")
-      if decoded != nil { hits += 1 }
-    } else {
-      lines.append("\(sensor.key) READ_FAIL")
-    }
-  }
-  lines.append("hits=\(hits)")
-  try lines.joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
-  let reading = try hardware.readMaximumTemperature(sensorGroups: Set(["cpu", "gpu"]))
-  lines.append("max=\(reading.maximum) sensor=\(reading.sensor)")
-  try lines.joined(separator: "\n").write(to: out, atomically: true, encoding: .utf8)
 }
 
 func status() throws {
@@ -221,9 +194,7 @@ func daemon() throws -> Never {
 }
 
 do {
-  if CommandLine.arguments.contains("--probe") {
-    try probe()
-  } else if CommandLine.arguments.contains("--status") {
+  if CommandLine.arguments.contains("--status") {
     try status()
   } else {
     try daemon()

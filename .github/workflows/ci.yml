@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Swift test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: thermal-fan-guard
+
+      - uses: actions/checkout@v4
+        with:
+          repository: agoodkind/macos-smc-fan
+          path: thermal-fan-guard-vendor
+
+      - name: Run tests
+        working-directory: thermal-fan-guard
+        run: swift test

@@ -47,6 +47,6 @@ public enum SMCTemperatureDecoder {
   }
 
   private static func valid(_ value: Double) -> Bool {
-    value.isFinite && value > 0 && value < 150
+    value.isFinite && (10...125).contains(value)
   }
 }

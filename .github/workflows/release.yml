@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+jobs:
+  build-pkg:
+    name: Build MyFans.pkg
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: thermal-fan-guard
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: agoodkind/macos-smc-fan
+          path: thermal-fan-guard-vendor
+
+      - name: Resolve version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${VERSION} (tag: ${GITHUB_REF_NAME})"
+
+      - name: Test
+        working-directory: thermal-fan-guard
+        run: swift test
+
+      - name: Build distribution pkg
+        working-directory: thermal-fan-guard
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: ./scripts/package-pkg.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: myfans-pkg
+          path: thermal-fan-guard/dist/pkg-build/MyFans-*.pkg
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-pkg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: myfans-pkg
+          path: dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: MyFans ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true

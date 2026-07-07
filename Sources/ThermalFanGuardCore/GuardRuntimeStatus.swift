@@ -55,11 +55,27 @@ public struct GuardRuntimeStatus: Codable, Sendable {
 
   public static func load() -> GuardRuntimeStatus? {
     guard let data = try? Data(contentsOf: fileURL) else { return nil }
+    if let value = decode(from: data) { return value }
+    return nil
+  }
+
+  private static func decode(from data: Data) -> GuardRuntimeStatus? {
     let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    if let value = try? decoder.decode(Self.self, from: data) { return value }
-    decoder.dateDecodingStrategy = .secondsSince1970
+    decoder.dateDecodingStrategy = .custom(decodeDate(from:))
     return try? decoder.decode(Self.self, from: data)
+  }
+
+  private static func decodeDate(from decoder: Decoder) throws -> Date {
+    let container = try decoder.singleValueContainer()
+    let string = try container.decode(String.self)
+    let withFraction = ISO8601DateFormatter()
+    withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = withFraction.date(from: string) { return date }
+    let withoutFraction = ISO8601DateFormatter()
+    withoutFraction.formatOptions = [.withInternetDateTime]
+    if let date = withoutFraction.date(from: string) { return date }
+    if let seconds = TimeInterval(string) { return Date(timeIntervalSince1970: seconds) }
+    throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unrecognized date: \(string)")
   }
 
   public func save() {

@@ -1,4 +1,6 @@
 .DS_Store
 .build/
+dist/
+packaging/dmg/background.png
 *.xcuserstate
 Resources/AppIcon.iconset/

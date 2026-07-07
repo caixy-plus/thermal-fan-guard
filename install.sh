@@ -2,7 +2,8 @@
 set -euo pipefail
 ROOT="${0:A:h}"
 LABEL="com.caixinyun.thermal-fan-guard"
-APP="/Applications/Thermal Fan Guard.app"
+APP="/Applications/MyFans.app"
+OLD_APP="/Applications/Thermal Fan Guard.app"
 AGENT="$LABEL-menubar"
 cd "$ROOT"
 
@@ -21,13 +22,20 @@ sudo install -o root -g wheel -m 0755 .build/release/ThermalFanGuardApp "$APP/Co
 sudo install -o root -g wheel -m 0644 ThermalFanGuardApp-Info.plist "$APP/Contents/Info.plist"
 if [[ -f Resources/AppIcon.icns ]]; then
   sudo install -o root -g wheel -m 0644 Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+else
+  echo "warning: Resources/AppIcon.icns not found" >&2
 fi
 sudo install -o root -g wheel -m 0644 README.md "$APP/Contents/Resources/README.md"
 sudo codesign --force --deep --sign - "$APP"
 
+# Remove legacy app bundle name if present.
+if [[ -d "$OLD_APP" && "$OLD_APP" != "$APP" ]]; then
+  sudo rm -rf "$OLD_APP"
+fi
+
 launchctl bootout "gui/$UID" "$HOME/Library/LaunchAgents/$AGENT.plist" 2>/dev/null || true
 rm -f "$HOME/Library/LaunchAgents/$AGENT.plist"
 
-echo "Installed daemon and menu bar app."
+echo "Installed daemon and menu bar app: $APP"
 echo "Enable login item in the app Settings if needed."
 echo "Log: tail -f /var/log/thermal-fan-guard.log"

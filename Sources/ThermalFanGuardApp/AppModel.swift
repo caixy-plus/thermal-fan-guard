@@ -8,6 +8,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var status: GuardRuntimeStatus?
   @Published private(set) var configuration = GuardConfiguration.load()
   @Published private(set) var history: [HistoryEntry] = []
+  @Published private(set) var pendingManualOverride: GuardCommand.Action?
+  @Published private(set) var manualOverrideError: String?
   @Published var showMenuBarTemperature = AppPreferences.showMenuBarTemperature
   @Published var notifyOnChange = AppPreferences.notifyOnChange
   @Published var notifyOnDeescalation = AppPreferences.notifyOnDeescalation
@@ -19,6 +21,13 @@ final class AppModel: ObservableObject {
   private var historySource: DispatchSourceFileSystemObject?
   private var configSource: DispatchSourceFileSystemObject?
   private var fallbackTimer: Timer?
+  private var overrideTimeoutTask: Task<Void, Never>?
+  private var lastManualControlIssuedAt: Date?
+
+  /// Minimum gap between manual fan commands (daemon applies on next sample tick).
+  private var manualControlCooldown: TimeInterval {
+    configuration.sampleInterval + 2
+  }
 
   var isDaemonOnline: Bool {
     guard let status else { return false }
@@ -36,13 +45,42 @@ final class AppModel: ObservableObject {
   }
 
   var isMaxMode: Bool {
-    status?.override == "max" || (status?.fanSpeedPercent == 100 && status?.mode != "automatic")
+    if pendingManualOverride == .max { return true }
+    return status?.override == "max" || (status?.fanSpeedPercent == 100 && status?.mode != "automatic")
+  }
+
+  var isManualOverridePending: Bool {
+    pendingManualOverride != nil
+  }
+
+  /// True while a command is in flight or within the post-issue cooldown window.
+  var isManualControlBusy: Bool {
+    if pendingManualOverride != nil { return true }
+    guard let lastManualControlIssuedAt else { return false }
+    return Date().timeIntervalSince(lastManualControlIssuedAt) < manualControlCooldown
+  }
+
+  var canIssueBoostToMax: Bool {
+    canControlFans && !isManualControlBusy && status?.override != "max"
+  }
+
+  var canIssueRestoreAutomatic: Bool {
+    canControlFans && !isManualControlBusy && isFanControlActive
+  }
+
+  private var isFanControlActive: Bool {
+    status?.override == "max" || status?.mode == "boosted" || status?.fanSpeedPercent != nil
+  }
+
+  var canControlFans: Bool {
+    isDaemonOnline
   }
 
   init() {
     reloadAll()
     startWatching()
     loginItems.refresh()
+    applyInstallerHandoffIfNeeded()
     fallbackTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.reloadAll() }
     }
@@ -54,6 +92,7 @@ final class AppModel: ObservableObject {
     status = GuardRuntimeStatus.load()
     history = TemperatureHistory.load()?.entries ?? []
     if let status {
+      reconcilePendingOverride(with: status)
       notifications.handleStatusChange(status: status, configuration: configuration)
     }
   }
@@ -77,21 +116,77 @@ final class AppModel: ObservableObject {
   }
 
   func boostToMax() {
-    do {
+    guard canIssueBoostToMax else { return }
+    issueManualOverride(expected: .max) {
       let timeout = configuration.overrideTimeout > 0 ? configuration.overrideTimeout : nil
       try GuardCommand.issueMax(expiresAfter: timeout)
-      reloadAll()
-    } catch {
-      NSLog("boost failed: \(error.localizedDescription)")
     }
   }
 
   func restoreAutomatic() {
-    do {
+    guard canIssueRestoreAutomatic else { return }
+    issueManualOverride(expected: .auto) {
       try GuardCommand.issueAuto()
+    }
+  }
+
+  private func issueManualOverride(expected: GuardCommand.Action, write: () throws -> Void) {
+    guard canControlFans, !isManualControlBusy else { return }
+    do {
+      try write()
+      pendingManualOverride = expected
+      manualOverrideError = nil
+      lastManualControlIssuedAt = Date()
       reloadAll()
+      scheduleOverrideTimeout(expected: expected)
+      scheduleCooldownRefresh()
     } catch {
-      NSLog("restore automatic failed: \(error.localizedDescription)")
+      pendingManualOverride = nil
+      manualOverrideError = error.localizedDescription
+    }
+  }
+
+  private func scheduleCooldownRefresh() {
+    let delay = manualControlCooldown
+    Task { [weak self] in
+      try? await Task.sleep(for: .seconds(delay))
+      await MainActor.run { self?.objectWillChange.send() }
+    }
+  }
+
+  private func scheduleOverrideTimeout(expected: GuardCommand.Action) {
+    overrideTimeoutTask?.cancel()
+    let timeout = manualControlCooldown + 3
+    overrideTimeoutTask = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(timeout))
+      await MainActor.run {
+        guard let self, !Task.isCancelled, self.pendingManualOverride == expected else { return }
+        switch expected {
+        case .max where self.status?.override != "max":
+          self.manualOverrideError = "守护进程未响应，请查看日志。"
+          self.pendingManualOverride = nil
+        case .auto where self.status?.override == "max" || self.status?.mode == "boosted":
+          self.manualOverrideError = "守护进程未响应，请查看日志。"
+          self.pendingManualOverride = nil
+        default:
+          break
+        }
+      }
+    }
+  }
+
+  private func reconcilePendingOverride(with status: GuardRuntimeStatus) {
+    switch pendingManualOverride {
+    case .max where status.override == "max":
+      pendingManualOverride = nil
+      manualOverrideError = nil
+      overrideTimeoutTask?.cancel()
+    case .auto where status.override != "max" && status.mode != "boosted":
+      pendingManualOverride = nil
+      manualOverrideError = nil
+      overrideTimeoutTask?.cancel()
+    default:
+      break
     }
   }
 
@@ -122,6 +217,7 @@ final class AppModel: ObservableObject {
   private func reloadStatus() {
     status = GuardRuntimeStatus.load()
     if let status {
+      reconcilePendingOverride(with: status)
       notifications.handleStatusChange(status: status, configuration: configuration)
     }
   }
@@ -164,6 +260,13 @@ final class AppModel: ObservableObject {
     } else {
       configSource?.cancel()
       configSource = source
+    }
+  }
+
+  private func applyInstallerHandoffIfNeeded() {
+    guard let handoff = InstallerHandoff.consume() else { return }
+    if handoff.registerLoginItem {
+      loginItems.setEnabled(true)
     }
   }
 }

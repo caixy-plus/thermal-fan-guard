@@ -8,6 +8,7 @@ let package = Package(
     .library(name: "ThermalFanGuardCore", targets: ["ThermalFanGuardCore"]),
     .executable(name: "thermal-fan-guard", targets: ["ThermalFanGuard"]),
     .executable(name: "ThermalFanGuardApp", targets: ["ThermalFanGuardApp"]),
+    .executable(name: "MyFansInstaller", targets: ["MyFansInstaller"]),
   ],
   dependencies: [
     .package(path: "../thermal-fan-guard-vendor"),
@@ -24,6 +25,10 @@ let package = Package(
     ),
     .executableTarget(
       name: "ThermalFanGuardApp",
+      dependencies: ["ThermalFanGuardCore"]
+    ),
+    .executableTarget(
+      name: "MyFansInstaller",
       dependencies: ["ThermalFanGuardCore"]
     ),
     .testTarget(

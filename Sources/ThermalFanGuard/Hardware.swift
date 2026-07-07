@@ -18,22 +18,26 @@ public enum GuardError: LocalizedError {
 }
 
 public final class ThermalHardware {
-  private let sensorConnection: SMCConnection
+  private let bootstrapConnection: SMCConnection
   private let fanConnection: SMCConnection
   private let controller: FanController
   private let catalog = SensorCatalog.keysForCurrentHardware().filter { $0.type == .temperature }
 
   public init() throws {
-    sensorConnection = try SMCConnection()
+    bootstrapConnection = try SMCConnection()
     fanConnection = try SMCConnection()
     controller = FanController(connection: fanConnection)
   }
 
   public func readMaximumTemperature(sensorGroups: Set<String>) throws -> TemperatureReading {
+    let sensorConnection = try SMCConnection()
     let allowed = Set(sensorGroups.map { $0.lowercased() })
-    var values = readCatalogTemperatures(allowedGroups: allowed)
+    var values = readCatalogTemperatures(allowedGroups: allowed, on: sensorConnection)
     if values.isEmpty {
-      values = discoverTemperatures(allowedGroups: allowed)
+      logSensorFallback(
+        "catalog sensors unreadable; scanning SMC T* keys for groups=\(allowed.sorted().joined(separator: ","))"
+      )
+      values = discoverTemperatures(allowedGroups: allowed, on: sensorConnection)
     }
     guard let hottest = values.max(by: { $0.1 < $1.1 }) else { throw GuardError.noTemperatureSensors }
     return .init(maximum: hottest.1, sensor: hottest.0, validSensorCount: values.count)
@@ -42,9 +46,9 @@ public final class ThermalHardware {
   public func readFans() throws -> [FanSnapshot] {
     try (0..<fanCount()).map { index in
       FanSnapshot(
-        actual: Int(try read(index, SMCFanKey.actual)),
-        target: Int(try read(index, SMCFanKey.target)),
-        maximum: Int(try read(index, SMCFanKey.maximum))
+        actual: Int(try readFan(index, SMCFanKey.actual)),
+        target: Int(try readFan(index, SMCFanKey.target)),
+        maximum: Int(try readFan(index, SMCFanKey.maximum))
       )
     }
   }
@@ -59,10 +63,10 @@ public final class ThermalHardware {
     let clamped = min(100, max(30, percent))
     let count = try fanCount()
     for index in 0..<count {
-      let maximum = try read(index, SMCFanKey.maximum)
+      let maximum = try readFan(index, SMCFanKey.maximum)
       let target = Float((Double(maximum) * Double(clamped) / 100.0).rounded())
       _ = try controller.enableManualMode(fanIndex: index)
-      try write(index, SMCFanKey.target, target)
+      try writeFan(index, SMCFanKey.target, target)
     }
   }
 
@@ -74,7 +78,7 @@ public final class ThermalHardware {
     let count = try fanCount()
     for index in 0..<count {
       try? fanConnection.writeKey(SMCFanKey.key(controller.config.modeKeyFormat, fan: index), bytes: [0])
-      try? write(index, SMCFanKey.target, 0)
+      try? writeFan(index, SMCFanKey.target, 0)
     }
     if controller.config.ftstAvailable,
        let (bytes, _) = try? fanConnection.readKey(SMCFanKey.forceTest), bytes.first == 1 {
@@ -82,42 +86,57 @@ public final class ThermalHardware {
     }
   }
 
-  private func readCatalogTemperatures(allowedGroups: Set<String>) -> [(String, Double)] {
+  private func readCatalogTemperatures(
+    allowedGroups: Set<String>,
+    on connection: SMCConnection
+  ) -> [(String, Double)] {
     var values: [(String, Double)] = []
-    for sensor in catalog where allowedGroups.contains(sensor.group.rawValue) {
-      guard let value = readTemperature(key: sensor.key) else { continue }
+    for sensor in catalog where allowedGroups.contains(sensor.group.rawValue.lowercased()) {
+      guard let value = readTemperature(key: sensor.key, on: connection) else { continue }
       values.append((sensor.name, value))
     }
     return values
   }
 
-  private func discoverTemperatures(allowedGroups: Set<String>) -> [(String, Double)] {
+  private func discoverTemperatures(
+    allowedGroups: Set<String>,
+    on connection: SMCConnection
+  ) -> [(String, Double)] {
     let knownNames = Dictionary(uniqueKeysWithValues: catalog.map { ($0.key, $0.name) })
-    let knownGroups = Dictionary(uniqueKeysWithValues: catalog.map { ($0.key, $0.group.rawValue) })
+    let knownGroups = Dictionary(uniqueKeysWithValues: catalog.map { ($0.key, $0.group.rawValue.lowercased()) })
     var values: [(String, Double)] = []
 
-    for key in sensorConnection.enumerateKeys() where isTemperatureKeyCandidate(key) {
+    for key in connection.enumerateKeys() where isTemperatureKeyCandidate(key) {
       let group = knownGroups[key] ?? inferredGroup(for: key)
       guard allowedGroups.contains(group) else { continue }
-      guard let value = readTemperature(key: key) else { continue }
+      guard let value = readTemperature(key: key, on: connection) else { continue }
       values.append((knownNames[key] ?? key, value))
     }
 
     if values.isEmpty {
-      for key in sensorConnection.enumerateKeys() where isTemperatureKeyCandidate(key) {
-        guard let value = readTemperature(key: key) else { continue }
+      logSensorFallback(
+        "group-filtered scan found no sensors; widening to all readable T* keys (may include non-CPU/GPU)"
+      )
+      for key in connection.enumerateKeys() where isTemperatureKeyCandidate(key) {
+        guard let value = readTemperature(key: key, on: connection) else { continue }
         values.append((knownNames[key] ?? key, value))
       }
     }
     return values
   }
 
-  private func readTemperature(key: String) -> Double? {
-    guard let (bytes, size) = try? sensorConnection.readKey(key) else { return nil }
+  private func logSensorFallback(_ message: String) {
+    let line = "\(ISO8601DateFormatter().string(from: Date())) SENSOR_FALLBACK \(message)\n"
+    fputs(line, stderr)
+    fflush(stderr)
+  }
+
+  private func readTemperature(key: String, on connection: SMCConnection) -> Double? {
+    guard let (bytes, size) = try? connection.readKey(key) else { return nil }
     if let value = SMCTemperatureDecoder.decode(bytes: bytes, size: size) {
       return value
     }
-    guard let (_, info) = try? sensorConnection.fetchKeyInfo(key) else { return nil }
+    guard let (_, info) = try? connection.fetchKeyInfo(key) else { return nil }
     let dataType = Self.dataTypeString(info.keyInfo.dataType)
     return SMCTemperatureDecoder.decode(bytes: bytes, size: size, dataType: dataType)
   }
@@ -150,12 +169,12 @@ public final class ThermalHardware {
     return Int(count)
   }
 
-  private func read(_ index: Int, _ format: String) throws -> Float {
+  private func readFan(_ index: Int, _ format: String) throws -> Float {
     let (bytes, size) = try fanConnection.readKey(SMCFanKey.key(format, fan: index))
     return SMCDataFormat.float(from: bytes, size: size)
   }
 
-  private func write(_ index: Int, _ format: String, _ value: Float) throws {
+  private func writeFan(_ index: Int, _ format: String, _ value: Float) throws {
     let key = SMCFanKey.key(format, fan: index)
     let (_, size) = try fanConnection.readKey(key)
     try fanConnection.writeKey(key, bytes: SMCDataFormat.bytes(from: value, size: size))

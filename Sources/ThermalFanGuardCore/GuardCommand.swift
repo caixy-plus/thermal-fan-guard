@@ -21,9 +21,29 @@ public struct GuardCommand: Codable, Sendable {
 
   public static func load() -> GuardCommand? {
     guard let data = try? Data(contentsOf: fileURL) else { return nil }
+    return decode(from: data)
+  }
+
+  private static func decode(from data: Data) -> GuardCommand? {
     let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
+    decoder.dateDecodingStrategy = .custom(decodeDate(from:))
     return try? decoder.decode(Self.self, from: data)
+  }
+
+  internal static func decodeForTesting(_ data: Data) -> GuardCommand? {
+    decode(from: data)
+  }
+
+  private static func decodeDate(from decoder: Decoder) throws -> Date {
+    let container = try decoder.singleValueContainer()
+    let string = try container.decode(String.self)
+    let withFraction = ISO8601DateFormatter()
+    withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = withFraction.date(from: string) { return date }
+    let withoutFraction = ISO8601DateFormatter()
+    withoutFraction.formatOptions = [.withInternetDateTime]
+    if let date = withoutFraction.date(from: string) { return date }
+    throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unrecognized date: \(string)")
   }
 
   public static func issueMax(expiresAfter: TimeInterval?) throws {

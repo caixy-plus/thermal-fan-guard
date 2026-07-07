@@ -55,7 +55,7 @@ final class NotificationManager {
 
     guard let activeIndex, let percent else {
       if previousFanSpeedPercent != nil {
-        post(title: "✅ 温度回落，已恢复自动控制", body: "风扇已交还给 macOS 自动管理。")
+        post(title: "温度回落，已恢复自动控制", body: "风扇已交还给 macOS 自动管理。")
       }
       return
     }
@@ -64,12 +64,12 @@ final class NotificationManager {
       if let previousPercent = previousFanSpeedPercent, percent < previousPercent {
         guard AppPreferences.notifyOnDeescalation else { return }
         post(
-          title: "↘️ 温度回落",
+          title: "温度回落",
           body: "降至第 \(activeIndex + 1) 档（\(percent)%）。"
         )
       } else if let temperature = status.temperature {
         post(
-          title: "🌡 \(Int(temperature.rounded()))°C 触发第 \(roman(activeIndex + 1)) 档规则",
+          title: "\(Int(temperature.rounded()))°C 触发第 \(roman(activeIndex + 1)) 档规则",
           body: "风扇加速至 \(percent)%。"
         )
       }

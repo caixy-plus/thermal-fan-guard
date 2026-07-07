@@ -116,6 +116,43 @@ import Testing
   #expect(!configuration.isValid)
 }
 
+@Test func editingNormalizationKeepsRecoveryBelowChangedTrigger() {
+  let configuration = GuardConfiguration(
+    rules: [
+      GuardRule(triggerTemperature: 45, triggerDuration: 30, fanSpeedPercent: 100, recoveryTemperature: 55, recoveryDuration: 30),
+    ]
+  )
+
+  let normalized = configuration.normalizedForEditing()
+
+  #expect(normalized.isValid)
+  #expect(normalized.rules[0].triggerTemperature == 45)
+  #expect(normalized.rules[0].recoveryTemperature == 44)
+}
+
+@Test func editingNormalizationClampsGlobalAndRuleFields() {
+  let configuration = GuardConfiguration(
+    rules: [
+      GuardRule(triggerTemperature: 140, triggerDuration: 1, fanSpeedPercent: 10, recoveryTemperature: 10, recoveryDuration: 900),
+    ],
+    sampleInterval: 1,
+    overrideTimeout: 123,
+    sensorGroups: []
+  )
+
+  let normalized = configuration.normalizedForEditing()
+
+  #expect(normalized.isValid)
+  #expect(normalized.rules[0].triggerTemperature == 120)
+  #expect(normalized.rules[0].triggerDuration == 5)
+  #expect(normalized.rules[0].fanSpeedPercent == 30)
+  #expect(normalized.rules[0].recoveryTemperature == 20)
+  #expect(normalized.rules[0].recoveryDuration == 600)
+  #expect(normalized.sampleInterval == 2)
+  #expect(normalized.overrideTimeout == 1800)
+  #expect(normalized.sensorGroups == ["cpu", "gpu"])
+}
+
 @Test func legacyConfigurationDecodesFlatFormat() throws {
   let json = """
   {

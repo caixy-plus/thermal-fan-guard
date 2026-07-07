@@ -136,6 +136,59 @@ public struct GuardConfiguration: Codable, Equatable, Sendable {
 
   public var offlineThreshold: TimeInterval { 4 * sampleInterval }
 
+  public func normalizedForEditing() -> GuardConfiguration {
+    var normalizedRules = Array(rules.prefix(8))
+    if normalizedRules.isEmpty {
+      normalizedRules = Self.defaults.rules
+    }
+
+    normalizedRules = normalizedRules.map { rule in
+      var copy = rule
+      copy.triggerTemperature = copy.triggerTemperature.clamped(to: 30...120)
+      copy.triggerDuration = copy.triggerDuration.clamped(to: 5...600)
+      copy.fanSpeedPercent = copy.fanSpeedPercent.clamped(to: 30...100)
+      copy.recoveryTemperature = copy.recoveryTemperature.clamped(to: 20...(copy.triggerTemperature - 1))
+      copy.recoveryDuration = copy.recoveryDuration.clamped(to: 5...600)
+      return copy
+    }
+    .sorted { $0.triggerTemperature < $1.triggerTemperature }
+
+    for index in normalizedRules.indices.dropFirst() {
+      let previousTrigger = normalizedRules[index - 1].triggerTemperature
+      normalizedRules[index].triggerTemperature = max(normalizedRules[index].triggerTemperature, previousTrigger + 2)
+    }
+
+    if let lastTrigger = normalizedRules.last?.triggerTemperature, lastTrigger > 120 {
+      let overflow = lastTrigger - 120
+      for index in normalizedRules.indices {
+        normalizedRules[index].triggerTemperature -= overflow
+      }
+    }
+
+    for index in normalizedRules.indices {
+      if index > normalizedRules.startIndex {
+        normalizedRules[index].fanSpeedPercent = max(
+          normalizedRules[index].fanSpeedPercent,
+          normalizedRules[index - 1].fanSpeedPercent
+        )
+      }
+      normalizedRules[index].recoveryTemperature = normalizedRules[index].recoveryTemperature.clamped(
+        to: 20...(normalizedRules[index].triggerTemperature - 1)
+      )
+    }
+
+    let allowedTimeouts: Set<TimeInterval> = [600, 1800, 3600, 0]
+    let filteredGroups = sensorGroups.filter { ["cpu", "gpu"].contains($0) }
+    let safeGroups = filteredGroups.isEmpty ? Self.defaults.sensorGroups : Array(Set(filteredGroups)).sorted()
+
+    return GuardConfiguration(
+      rules: normalizedRules,
+      sampleInterval: sampleInterval.clamped(to: 2...30),
+      overrideTimeout: allowedTimeouts.contains(overrideTimeout) ? overrideTimeout : Self.defaults.overrideTimeout,
+      sensorGroups: safeGroups
+    )
+  }
+
   public static func load() -> GuardConfiguration {
     guard let data = try? Data(contentsOf: fileURL),
           let value = try? JSONDecoder().decode(Self.self, from: data),
@@ -150,6 +203,12 @@ public struct GuardConfiguration: Codable, Equatable, Sendable {
     let data = try JSONEncoder.pretty.encode(copy)
     try data.write(to: Self.fileURL, options: .atomic)
     try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: Self.fileURL.path)
+  }
+}
+
+private extension Comparable {
+  func clamped(to range: ClosedRange<Self>) -> Self {
+    min(range.upperBound, max(range.lowerBound, self))
   }
 }
 

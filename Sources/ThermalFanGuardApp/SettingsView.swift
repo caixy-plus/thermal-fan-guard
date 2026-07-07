@@ -68,12 +68,18 @@ struct RulesSettingsTab: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Color(nsColor: .windowBackgroundColor))
     .onAppear {
-      draft = model.configuration
-      lastPersisted = model.configuration
+      let configuration = model.configuration.normalizedForEditing()
+      draft = configuration
+      lastPersisted = configuration
       isSyncing = false
     }
     .onChange(of: draft) { _, newValue in
-      persistIfNeeded(newValue)
+      let normalized = newValue.normalizedForEditing()
+      if normalized != newValue {
+        draft = normalized
+        return
+      }
+      persistIfNeeded(normalized)
     }
   }
 
@@ -90,7 +96,7 @@ struct RulesSettingsTab: View {
 
   private var rulesList: some View {
     VStack(spacing: 6) {
-      ForEach(Array(draft.rules.enumerated()), id: \.element.id) { index, rule in
+      ForEach(Array(draft.sortedRules.enumerated()), id: \.element.id) { index, rule in
         if let binding = binding(for: rule.id) {
           RuleCardView(
             index: index,
@@ -115,7 +121,7 @@ struct RulesSettingsTab: View {
       .disabled(draft.rules.count >= 8)
 
       Button("恢复默认值") {
-        draft = .defaults
+        draft = GuardConfiguration.defaults.normalizedForEditing()
       }
       .buttonStyle(.borderless)
       .foregroundStyle(.secondary)
@@ -227,6 +233,7 @@ struct RulesSettingsTab: View {
         recoveryDuration: last.recoveryDuration
       )
     )
+    draft = draft.normalizedForEditing()
   }
 }
 
@@ -474,6 +481,8 @@ private struct MetricField: View {
   let unit: String
   @Binding var value: Double
   let range: ClosedRange<Double>
+  @State private var draftText = ""
+  @FocusState private var isFocused: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
@@ -481,18 +490,61 @@ private struct MetricField: View {
         .font(.caption2)
         .foregroundStyle(.secondary)
       HStack(spacing: 3) {
-        TextField(label, value: $value, format: .number.precision(.fractionLength(0)))
+        TextField(label, text: $draftText)
           .textFieldStyle(.roundedBorder)
           .frame(width: 48)
           .multilineTextAlignment(.trailing)
+          .focused($isFocused)
+          .onSubmit {
+            commitDraft()
+            isFocused = false
+          }
+          .onAppear {
+            draftText = formatted(value)
+          }
+          .onChange(of: isFocused) { _, focused in
+            if focused {
+              draftText = formatted(value)
+            } else {
+              commitDraft()
+            }
+          }
           .onChange(of: value) { _, newValue in
-            value = min(range.upperBound, max(range.lowerBound, newValue))
+            guard !isFocused else { return }
+            draftText = formatted(newValue)
+          }
+          .onChange(of: range.lowerBound) {
+            guard !isFocused else { return }
+            draftText = formatted(clamped(value))
+          }
+          .onChange(of: range.upperBound) {
+            guard !isFocused else { return }
+            draftText = formatted(clamped(value))
           }
         Text(unit)
           .font(.caption2)
           .foregroundStyle(.secondary)
       }
     }
+  }
+
+  private func clamped(_ newValue: Double) -> Double {
+    min(range.upperBound, max(range.lowerBound, newValue))
+  }
+
+  private func commitDraft() {
+    let trimmed = draftText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let parsed = Double(trimmed) else {
+      draftText = formatted(value)
+      return
+    }
+    let committed = clamped(parsed)
+    value = committed
+    draftText = formatted(committed)
+  }
+
+  private func formatted(_ newValue: Double) -> String {
+    String(Int(newValue.rounded()))
   }
 }
 

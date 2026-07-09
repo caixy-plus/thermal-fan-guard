@@ -153,6 +153,16 @@ import Testing
   #expect(normalized.sensorGroups == ["cpu", "gpu"])
 }
 
+@Test func uninstallScriptRemovesInstalledComponents() {
+  let script = UninstallScript.shellScript()
+
+  #expect(script.contains("/Applications/MyFans.app"))
+  #expect(script.contains("/Library/LaunchDaemons/com.caixinyun.thermal-fan-guard.plist"))
+  #expect(script.contains("/usr/local/libexec/thermal-fan-guard"))
+  #expect(script.contains("/Users/Shared/com.caixinyun.thermal-fan-guard.status.json"))
+  #expect(script.contains("lsregister"))
+}
+
 @Test func legacyConfigurationDecodesFlatFormat() throws {
   let json = """
   {

@@ -30,5 +30,8 @@ install -m 0644 README.md "$APP/Contents/Resources/README.md"
 xattr -cr "$APP"
 chmod +x "$APP/Contents/MacOS/ThermalFanGuardApp"
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
+touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f "$APP" 2>/dev/null || true
 
 echo "Staged: $APP"

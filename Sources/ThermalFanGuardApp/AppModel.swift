@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
   @Published var showMenuBarTemperature = AppPreferences.showMenuBarTemperature
   @Published var notifyOnChange = AppPreferences.notifyOnChange
   @Published var notifyOnDeescalation = AppPreferences.notifyOnDeescalation
+  @Published private(set) var isUninstalling = false
+  @Published private(set) var uninstallError: String?
 
   let loginItems = LoginItemManager()
   let notifications = NotificationManager()
@@ -202,6 +204,47 @@ final class AppModel: ObservableObject {
     }
   }
 
+  func uninstall() {
+    guard !isUninstalling else { return }
+    isUninstalling = true
+    uninstallError = nil
+    loginItems.setEnabled(false)
+
+    Task {
+      let result = await runPrivilegedUninstall()
+      await MainActor.run {
+        self.isUninstalling = false
+        switch result {
+        case .success:
+          NSApplication.shared.terminate(nil)
+        case .failure(let error):
+          self.uninstallError = error.localizedDescription
+        }
+      }
+    }
+  }
+
+  private nonisolated func runPrivilegedUninstall() async -> Result<Void, Error> {
+    await Task.detached {
+      do {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = [
+          "-e",
+          "do shell script \(appleScriptQuote(UninstallScript.shellScript())) with administrator privileges",
+        ]
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus == 0 {
+          return .success(())
+        }
+        return .failure(UninstallError.cancelledOrFailed)
+      } catch {
+        return .failure(error)
+      }
+    }.value
+  }
+
   private func startWatching() {
     watch(GuardRuntimeStatus.fileURL) { [weak self] in
       Task { @MainActor in self?.reloadStatus() }
@@ -269,4 +312,16 @@ final class AppModel: ObservableObject {
       loginItems.setEnabled(true)
     }
   }
+}
+
+private enum UninstallError: LocalizedError {
+  case cancelledOrFailed
+
+  var errorDescription: String? {
+    "卸载未完成，可能是授权被取消或系统命令失败。"
+  }
+}
+
+private func appleScriptQuote(_ value: String) -> String {
+  "\"\(value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\""))\""
 }

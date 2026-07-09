@@ -45,6 +45,13 @@ struct SettingsWindowConfigurator: NSViewRepresentable {
       configuredWindow = window
       window.setContentSize(size)
       window.center()
+      window.initialFirstResponder = nil
+      window.makeFirstResponder(nil)
+      Task { @MainActor [weak self, weak window] in
+        await Task.yield()
+        guard self?.configuredWindow === window else { return }
+        window?.makeFirstResponder(nil)
+      }
     }
   }
 

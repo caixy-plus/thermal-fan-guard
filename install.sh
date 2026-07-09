@@ -27,6 +27,9 @@ else
 fi
 sudo install -o root -g wheel -m 0644 README.md "$APP/Contents/Resources/README.md"
 sudo codesign --force --deep --sign - "$APP"
+sudo touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+  -f "$APP" 2>/dev/null || true
 
 # Remove legacy app bundle name if present.
 if [[ -d "$OLD_APP" && "$OLD_APP" != "$APP" ]]; then

@@ -334,6 +334,7 @@ struct RuleCardView: View {
 
 struct GeneralSettingsTab: View {
   @EnvironmentObject private var model: AppModel
+  @State private var isConfirmingUninstall = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: SettingsMetrics.sectionSpacing) {
@@ -345,7 +346,7 @@ struct GeneralSettingsTab: View {
           .foregroundStyle(.secondary)
       }
 
-      SettingsCard(title: "启动与显示", icon: "menubar.rectangle") {
+      SettingsCard(title: "启动与显示", icon: "menubar.rectangle", width: SettingsMetrics.rulesContentWidth) {
         VStack(alignment: .leading, spacing: 0) {
           SettingsToggleRow("登录时启动", isOn: loginAtStartup)
           Divider().padding(.leading, SettingsMetrics.labelWidth + SettingsMetrics.columnGap)
@@ -353,7 +354,7 @@ struct GeneralSettingsTab: View {
         }
       }
 
-      SettingsCard(title: "通知", icon: "bell") {
+      SettingsCard(title: "通知", icon: "bell", width: SettingsMetrics.rulesContentWidth) {
         VStack(alignment: .leading, spacing: 0) {
           SettingsToggleRow("触发/恢复时发送通知", isOn: notifyOnChange)
           Divider().padding(.leading, SettingsMetrics.labelWidth + SettingsMetrics.columnGap)
@@ -366,7 +367,7 @@ struct GeneralSettingsTab: View {
         FeedbackBanner(text: error, tint: .red, icon: "exclamationmark.circle.fill")
       }
 
-      SettingsCard(title: "诊断", icon: "doc.text") {
+      SettingsCard(title: "诊断", icon: "doc.text", width: SettingsMetrics.rulesContentWidth) {
         SettingsLabeledRow(label: "日志") {
           Button {
             model.openLog()
@@ -376,13 +377,36 @@ struct GeneralSettingsTab: View {
           .buttonStyle(.link)
         }
       }
+
+      SettingsCard(title: "维护", icon: "wrench.and.screwdriver", width: SettingsMetrics.rulesContentWidth) {
+        SettingsLabeledRow(label: "卸载") {
+          Button(role: .destructive) {
+            isConfirmingUninstall = true
+          } label: {
+            Label(model.isUninstalling ? "正在卸载…" : "卸载 MyFans", systemImage: "trash")
+          }
+          .disabled(model.isUninstalling)
+        }
+      }
+
+      if let uninstallError = model.uninstallError {
+        FeedbackBanner(text: uninstallError, tint: .red, icon: "xmark.circle.fill")
+      }
     }
-    .frame(width: SettingsMetrics.formWidth, alignment: .leading)
+    .frame(width: SettingsMetrics.rulesContentWidth, alignment: .leading)
     .padding(.horizontal, SettingsMetrics.horizontalPadding)
     .padding(.vertical, SettingsMetrics.verticalPadding)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .background(Color(nsColor: .windowBackgroundColor))
     .onAppear { model.loginItems.refresh() }
+    .alert("卸载 MyFans？", isPresented: $isConfirmingUninstall) {
+      Button("取消", role: .cancel) {}
+      Button("卸载", role: .destructive) {
+        model.uninstall()
+      }
+    } message: {
+      Text("将移除菜单栏应用、后台守护进程和运行状态文件。温度规则配置会保留，方便以后重新安装。")
+    }
   }
 
   private var loginAtStartup: Binding<Bool> {

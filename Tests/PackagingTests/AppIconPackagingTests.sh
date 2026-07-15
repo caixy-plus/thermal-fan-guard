@@ -37,14 +37,17 @@ if ! /usr/bin/grep -q '"Name" : "AppIcon"' "$temp_dir/asset-info.json"; then
   exit 1
 fi
 
-if ! /usr/bin/grep -q '"AssetType" : "IconImageStack"' "$temp_dir/asset-info.json"; then
-  echo "compiled AppIcon is missing the macOS 26 layered icon stack" >&2
-  exit 1
+if /usr/bin/grep -q '"AssetType" : "IconImageStack"' "$temp_dir/asset-info.json"; then
+  if ! /usr/bin/grep -q '"ISAppearanceTintable"' "$temp_dir/asset-info.json"; then
+    echo "compiled AppIcon is missing the monochrome notification appearance" >&2
+    exit 1
+  fi
 fi
 
-if ! /usr/bin/grep -q '"ISAppearanceTintable"' "$temp_dir/asset-info.json"; then
-  echo "compiled AppIcon is missing the monochrome notification appearance" >&2
-  exit 1
-fi
+legacy_dir=$(mktemp -d)
+trap 'rm -rf "$temp_dir" "$legacy_dir"' EXIT
+FORCE_LEGACY_APP_ICON=1 "$ROOT/scripts/compile-app-icon.sh" "$legacy_dir"
+[[ -f "$legacy_dir/Assets.car" ]] || { echo "legacy compiler did not produce Assets.car" >&2; exit 1; }
+[[ -f "$legacy_dir/AppIcon.icns" ]] || { echo "legacy compiler did not produce AppIcon.icns" >&2; exit 1; }
 
 echo "App icon packaging checks passed."

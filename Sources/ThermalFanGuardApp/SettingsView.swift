@@ -368,13 +368,23 @@ struct GeneralSettingsTab: View {
       }
 
       SettingsCard(title: "诊断", icon: "doc.text", width: SettingsMetrics.rulesContentWidth) {
-        SettingsLabeledRow(label: "日志") {
-          Button {
-            model.openLog()
-          } label: {
-            Label("打开日志", systemImage: "arrow.up.forward.app")
+        VStack(alignment: .leading, spacing: 0) {
+          SettingsLabeledRow(label: "版本") {
+            Text(model.versionText)
+              .foregroundStyle(.secondary)
+              .monospacedDigit()
           }
-          .buttonStyle(.link)
+
+          Divider().padding(.leading, SettingsMetrics.labelWidth + SettingsMetrics.columnGap)
+
+          SettingsLabeledRow(label: "日志") {
+            Button {
+              model.openLog()
+            } label: {
+              Label("打开日志", systemImage: "arrow.up.forward.app")
+            }
+            .buttonStyle(.link)
+          }
         }
       }
 

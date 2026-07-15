@@ -18,6 +18,9 @@ if [[ -d "$APP" ]]; then
   touch "$APP"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
     -f "$APP" 2>/dev/null || true
+  # Notification Center caches the app icon per bundle ID; restart usernoted so
+  # an updated icon shows up on new notifications without a reboot.
+  killall usernoted 2>/dev/null || true
 fi
 
 exit 0

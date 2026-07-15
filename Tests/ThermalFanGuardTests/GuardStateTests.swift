@@ -96,6 +96,35 @@ import Testing
   #expect(decision.fanSpeedPercent == nil)
 }
 
+@Test func configurationResetRequestsHardwareAutomaticRestore() {
+  let original = GuardConfiguration(
+    rules: [
+      GuardRule(triggerTemperature: 60, triggerDuration: 5, fanSpeedPercent: 100, recoveryTemperature: 55, recoveryDuration: 5),
+    ]
+  )
+  var state = MultiRuleGuardState(configuration: original)
+  let start = Date(timeIntervalSince1970: 0)
+  _ = state.observe(temperature: 62, at: start)
+  _ = state.observe(temperature: 62, at: start.addingTimeInterval(5))
+  #expect(state.fanSpeedPercent == 100)
+
+  let edited = GuardConfiguration(
+    rules: [
+      GuardRule(triggerTemperature: 70, triggerDuration: 30, fanSpeedPercent: 100, recoveryTemperature: 60, recoveryDuration: 10),
+    ]
+  )
+
+  let requiresRestore = state.apply(edited)
+  #expect(requiresRestore)
+  #expect(state.fanSpeedPercent == nil)
+}
+
+@Test func freshDaemonStateRequestsHardwareAutomaticControl() {
+  let state = MultiRuleGuardState(configuration: .defaults)
+
+  #expect(state.hardwareAction == .restoreAutomatic)
+}
+
 @Test func configurationRequiresTwoDegreeSpacing() {
   let configuration = GuardConfiguration(
     rules: [
@@ -161,6 +190,12 @@ import Testing
   #expect(script.contains("/usr/local/libexec/thermal-fan-guard"))
   #expect(script.contains("/Users/Shared/com.caixinyun.thermal-fan-guard.status.json"))
   #expect(script.contains("lsregister"))
+}
+
+@Test func appVersionDisplaysBuildWhenDifferent() {
+  #expect(AppVersion(shortVersion: "2.1", build: "21").displayText == "2.1 (21)")
+  #expect(AppVersion(shortVersion: "2.1", build: "2.1").displayText == "2.1")
+  #expect(AppVersion(shortVersion: "2.1", build: "").displayText == "2.1")
 }
 
 @Test func legacyConfigurationDecodesFlatFormat() throws {
@@ -274,4 +309,140 @@ import Testing
   )
   #expect(resolution.maxOverrideActive)
   #expect(!resolution.shouldResetRuleState)
+}
+
+@Test func temperaturePresentationDoesNotRoundAcrossRecoveryThreshold() {
+  #expect(TemperaturePresentation.menuBarText(60.315) == " 60.3°")
+}
+
+@Test func rulePresentationIncludesRecoveryDuration() {
+  let rule = GuardRule(
+    triggerTemperature: 65,
+    triggerDuration: 30,
+    fanSpeedPercent: 100,
+    recoveryTemperature: 60,
+    recoveryDuration: 10
+  )
+
+  #expect(TemperaturePresentation.ruleSummary(rule, marker: "I") == "I ≥65° 30s → 100% (≤60° 持续10s 解除)")
+}
+
+@Test func fullSpeedDisablesBoostAndEnablesRestore() {
+  let status = GuardRuntimeStatus(
+    timestamp: Date(),
+    temperature: 70,
+    sensor: "test",
+    validSensorCount: 1,
+    mode: "maximum",
+    fanStatus: nil,
+    error: nil,
+    fanSpeedPercent: 100,
+    override: "none"
+  )
+
+  let availability = FanControlAvailability(
+    status: status,
+    canControlFans: true,
+    isBusy: false
+  )
+
+  #expect(!availability.canBoostToMax)
+  #expect(availability.canRestoreAutomatic)
+}
+
+@Test func identicalStatusEventsShareNotificationIdentifier() {
+  let first = StatusNotificationIdentifier(kind: .recovered)
+  let duplicate = StatusNotificationIdentifier(kind: .recovered)
+  let escalation = StatusNotificationIdentifier(kind: .escalated(ruleIndex: 0, percent: 100))
+
+  #expect(first.value == duplicate.value)
+  #expect(first.value != escalation.value)
+}
+
+@Test func sustainedManualMaximumDoesNotEmitRepeatedRecovery() {
+  var tracker = StatusNotificationTracker()
+  tracker.seed(
+    activeRuleIndex: nil,
+    fanSpeedPercent: nil,
+    override: "none"
+  )
+
+  #expect(tracker.transition(
+    activeRuleIndex: nil,
+    fanSpeedPercent: 100,
+    override: "max"
+  ) == .manualMaximumEnabled)
+  #expect(tracker.transition(
+    activeRuleIndex: nil,
+    fanSpeedPercent: 100,
+    override: "max"
+  ) == nil)
+}
+
+@Test func unchangedFullSpeedDoesNotEmitAnotherEscalation() {
+  var tracker = StatusNotificationTracker()
+  tracker.seed(
+    activeRuleIndex: 0,
+    fanSpeedPercent: 100,
+    override: "none"
+  )
+
+  #expect(tracker.transition(
+    activeRuleIndex: 1,
+    fanSpeedPercent: 100,
+    override: "none"
+  ) == nil)
+}
+
+@Test func oneAutoCancelsRepeatedMaxIncludingLateWrites() {
+  let configuration = GuardConfiguration.defaults
+  let daemonStart = Date(timeIntervalSince1970: 100)
+  var controller = GuardOverrideController()
+
+  let firstMax = GuardCommand(
+    action: .max,
+    issuedAt: Date(timeIntervalSince1970: 110),
+    expiresAfter: 600
+  )
+  let secondMax = GuardCommand(
+    action: .max,
+    issuedAt: Date(timeIntervalSince1970: 120),
+    expiresAfter: 600
+  )
+  let restore = GuardCommand(
+    action: .auto,
+    issuedAt: Date(timeIntervalSince1970: 130),
+    expiresAfter: nil
+  )
+
+  #expect(controller.resolve(
+    command: firstMax,
+    configuration: configuration,
+    daemonStart: daemonStart,
+    now: Date(timeIntervalSince1970: 110)
+  ).maxOverrideActive)
+  #expect(controller.resolve(
+    command: secondMax,
+    configuration: configuration,
+    daemonStart: daemonStart,
+    now: Date(timeIntervalSince1970: 120)
+  ).maxOverrideActive)
+
+  let restored = controller.resolve(
+    command: restore,
+    configuration: configuration,
+    daemonStart: daemonStart,
+    now: Date(timeIntervalSince1970: 130)
+  )
+  #expect(!restored.maxOverrideActive)
+  #expect(restored.shouldResetRuleState)
+
+  let lateMax = controller.resolve(
+    command: secondMax,
+    configuration: configuration,
+    daemonStart: daemonStart,
+    now: Date(timeIntervalSince1970: 131)
+  )
+  #expect(!lateMax.maxOverrideActive)
+  #expect(lateMax.shouldClearCommandFile)
 }

@@ -9,6 +9,23 @@ APP_ROOT="$COMPONENTS/app-root"
 DAEMON_ROOT="$COMPONENTS/daemon-root"
 SIGN_IDENTITY="${INSTALLER_SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-}"
+NOTARY_KEYCHAIN_PATH="${NOTARY_KEYCHAIN_PATH:-}"
+REQUIRE_RELEASE_SIGNING="${REQUIRE_RELEASE_SIGNING:-0}"
+
+if [[ "$REQUIRE_RELEASE_SIGNING" == "1" ]]; then
+  if [[ -z "${APPLICATION_SIGN_IDENTITY:-}" ]]; then
+    echo "APPLICATION_SIGN_IDENTITY is required for release packaging" >&2
+    exit 1
+  fi
+  if [[ -z "$SIGN_IDENTITY" ]]; then
+    echo "INSTALLER_SIGN_IDENTITY is required for release packaging" >&2
+    exit 1
+  fi
+  if [[ -z "$NOTARY_PROFILE" ]]; then
+    echo "NOTARY_KEYCHAIN_PROFILE is required for release packaging" >&2
+    exit 1
+  fi
+fi
 
 cd "$ROOT"
 
@@ -60,11 +77,20 @@ fi
 
 productbuild "${PRODUCTBUILD_ARGS[@]}" "$PRODUCT_PKG"
 
+if [[ -n "$SIGN_IDENTITY" ]]; then
+  pkgutil --check-signature "$PRODUCT_PKG"
+fi
+
 echo "Created: $PRODUCT_PKG"
 
 if [[ -n "$NOTARY_PROFILE" ]]; then
   echo "Submitting for notarization..."
-  xcrun notarytool submit "$PRODUCT_PKG" --keychain-profile "$NOTARY_PROFILE" --wait
+  NOTARYTOOL_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+  if [[ -n "$NOTARY_KEYCHAIN_PATH" ]]; then
+    NOTARYTOOL_ARGS+=(--keychain "$NOTARY_KEYCHAIN_PATH")
+  fi
+  xcrun notarytool submit "$PRODUCT_PKG" "${NOTARYTOOL_ARGS[@]}" --wait
   xcrun stapler staple "$PRODUCT_PKG"
+  xcrun stapler validate "$PRODUCT_PKG"
   echo "Notarized and stapled: $PRODUCT_PKG"
 fi

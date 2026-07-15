@@ -43,7 +43,14 @@ final class AppModel: ObservableObject {
 
   var menuBarTemperatureText: String {
     guard showMenuBarTemperature, isDaemonOnline, let temperature = status?.temperature else { return "" }
-    return String(format: " %.0f°", temperature)
+    return TemperaturePresentation.menuBarText(temperature)
+  }
+
+  var versionText: String {
+    let info = Bundle.main.infoDictionary ?? [:]
+    let shortVersion = info["CFBundleShortVersionString"] as? String ?? "0"
+    let build = info["CFBundleVersion"] as? String ?? ""
+    return AppVersion(shortVersion: shortVersion, build: build).displayText
   }
 
   var isMaxMode: Bool {
@@ -63,15 +70,19 @@ final class AppModel: ObservableObject {
   }
 
   var canIssueBoostToMax: Bool {
-    canControlFans && !isManualControlBusy && status?.override != "max"
+    fanControlAvailability.canBoostToMax
   }
 
   var canIssueRestoreAutomatic: Bool {
-    canControlFans && !isManualControlBusy && isFanControlActive
+    fanControlAvailability.canRestoreAutomatic
   }
 
-  private var isFanControlActive: Bool {
-    status?.override == "max" || status?.mode == "boosted" || status?.fanSpeedPercent != nil
+  private var fanControlAvailability: FanControlAvailability {
+    FanControlAvailability(
+      status: status,
+      canControlFans: canControlFans,
+      isBusy: isManualControlBusy
+    )
   }
 
   var canControlFans: Bool {

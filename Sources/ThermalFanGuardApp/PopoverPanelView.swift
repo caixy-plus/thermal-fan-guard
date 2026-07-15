@@ -231,7 +231,7 @@ struct PopoverPanelView: View {
 
   private func ruleLine(index: Int, rule: GuardRule) -> String {
     let marker = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"][index]
-    return "\(marker) ≥\(Int(rule.triggerTemperature))° \(Int(rule.triggerDuration))s → \(rule.fanSpeedPercent)% (≤\(Int(rule.recoveryTemperature))° 解除)"
+    return TemperaturePresentation.ruleSummary(rule, marker: marker)
   }
 
   private var footerSection: some View {

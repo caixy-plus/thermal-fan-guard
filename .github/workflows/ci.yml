@@ -25,3 +25,13 @@ jobs:
       - name: Run tests
         working-directory: thermal-fan-guard
         run: swift test
+
+      - name: Verify app icon packaging
+        working-directory: thermal-fan-guard
+        run: ./Tests/PackagingTests/AppIconPackagingTests.sh
+
+      - name: Verify release packaging contracts
+        working-directory: thermal-fan-guard
+        run: |
+          zsh Tests/PackagingTests/ReleaseSigningTests.sh
+          zsh Tests/PackagingTests/ReleaseWorkflowTests.sh

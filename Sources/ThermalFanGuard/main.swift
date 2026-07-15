@@ -47,6 +47,7 @@ func daemon() throws -> Never {
   let daemonStart = Date()
   var configuration = GuardConfiguration.load()
   var state = MultiRuleGuardState(configuration: configuration)
+  var overrideController = GuardOverrideController()
   let history = HistoryStore(sampleInterval: configuration.sampleInterval)
   var stop = false
 
@@ -59,14 +60,22 @@ func daemon() throws -> Never {
   term.resume()
   intr.resume()
 
-  log(
-    "started rules=\(configuration.sortedRules.count) interval=\(Int(configuration.sampleInterval))s sensors=\(configuration.sensorGroups.joined(separator: ","))"
-  )
   defer {
     try? hardware.restoreAutomaticControl()
     history.flushIfNeeded(force: true)
     log("stopped; restored automatic fan control")
   }
+
+  switch state.hardwareAction {
+  case .restoreAutomatic:
+    try hardware.restoreAutomaticControl()
+    log("startup restored automatic fan control")
+  case let .setPercent(percent):
+    try hardware.setFans(toPercent: percent)
+  }
+  log(
+    "started rules=\(configuration.sortedRules.count) interval=\(Int(configuration.sampleInterval))s sensors=\(configuration.sensorGroups.joined(separator: ","))"
+  )
 
   while !stop {
     let now = Date()
@@ -74,13 +83,16 @@ func daemon() throws -> Never {
       let latestConfiguration = GuardConfiguration.load()
       if latestConfiguration != configuration {
         configuration = latestConfiguration
-        state.apply(configuration)
+        if state.apply(configuration) {
+          try hardware.restoreAutomaticControl()
+          log("configuration reset active rule; restored automatic fan control")
+        }
         history.reconfigure(sampleInterval: configuration.sampleInterval)
         log("configuration updated rules=\(configuration.sortedRules.count)")
       }
 
       let command = GuardCommand.load()
-      var override = GuardOverrideResolver.resolve(
+      var override = overrideController.resolve(
         command: command,
         configuration: configuration,
         daemonStart: daemonStart,

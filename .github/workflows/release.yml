@@ -32,13 +32,82 @@ jobs:
 
       - name: Test
         working-directory: thermal-fan-guard
-        run: swift test
+        run: |
+          swift test
+          zsh Tests/PackagingTests/ReleaseSigningTests.sh
+          zsh Tests/PackagingTests/ReleaseWorkflowTests.sh
+
+      - name: Configure Developer ID signing and notarization
+        working-directory: thermal-fan-guard
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          NOTARY_KEYCHAIN_PROFILE: myfans-notary
+        run: |
+          set -euo pipefail
+
+          CERTIFICATE_PATH="${RUNNER_TEMP}/myfans-developer-id.p12"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/myfans-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 48)"
+
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" \
+            | /usr/bin/base64 --decode -o "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -t agg \
+            -f pkcs12 \
+            -T /usr/bin/codesign \
+            -T /usr/bin/productbuild \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          security find-identity -v -p basic "$KEYCHAIN_PATH" \
+            | grep -F 'Developer ID Application: xinyun Cai (PU2Y2C2PT8)'
+          security find-identity -v -p basic "$KEYCHAIN_PATH" \
+            | grep -F 'Developer ID Installer: xinyun Cai (PU2Y2C2PT8)'
+
+          xcrun notarytool store-credentials "$NOTARY_KEYCHAIN_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH"
 
       - name: Build distribution pkg
         working-directory: thermal-fan-guard
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          APPLICATION_SIGN_IDENTITY: "Developer ID Application: xinyun Cai (PU2Y2C2PT8)"
+          INSTALLER_SIGN_IDENTITY: "Developer ID Installer: xinyun Cai (PU2Y2C2PT8)"
+          NOTARY_KEYCHAIN_PROFILE: myfans-notary
+          NOTARY_KEYCHAIN_PATH: ${{ runner.temp }}/myfans-signing.keychain-db
+          REQUIRE_RELEASE_SIGNING: "1"
         run: ./scripts/package-pkg.sh
+
+      - name: Verify signed and notarized package
+        working-directory: thermal-fan-guard
+        run: |
+          set -euo pipefail
+          packages=(dist/pkg-build/MyFans-*.pkg)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "expected exactly one release package, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          pkgutil --check-signature "${packages[0]}"
+          xcrun stapler validate "${packages[0]}"
+          spctl -a -vv --type install "${packages[0]}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -46,6 +115,16 @@ jobs:
           name: myfans-pkg
           path: thermal-fan-guard/dist/pkg-build/MyFans-*.pkg
           retention-days: 14
+
+      - name: Remove temporary signing material
+        if: ${{ always() }}
+        run: |
+          KEYCHAIN_PATH="${RUNNER_TEMP}/myfans-signing.keychain-db"
+          CERTIFICATE_PATH="${RUNNER_TEMP}/myfans-developer-id.p12"
+          if [[ -f "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$CERTIFICATE_PATH"
 
   publish-release:
     name: Publish GitHub Release

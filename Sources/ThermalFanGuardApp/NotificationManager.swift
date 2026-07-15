@@ -4,10 +4,7 @@ import ThermalFanGuardCore
 
 @MainActor
 final class NotificationManager {
-  private var previousActiveRuleIndex: Int?
-  private var previousFanSpeedPercent: Int?
-  private var previousOverride: String?
-  private var hasBaseline = false
+  private var tracker = StatusNotificationTracker()
 
   func requestAuthorizationIfNeeded() async {
     let center = UNUserNotificationCenter.current()
@@ -17,71 +14,63 @@ final class NotificationManager {
   }
 
   func seedBaseline(from status: GuardRuntimeStatus) {
-    previousActiveRuleIndex = status.activeRuleIndex
-    previousFanSpeedPercent = status.fanSpeedPercent
-    previousOverride = status.override ?? "none"
-    hasBaseline = true
+    tracker.seed(
+      activeRuleIndex: status.activeRuleIndex,
+      fanSpeedPercent: status.fanSpeedPercent,
+      override: status.override ?? "none"
+    )
   }
 
-  func handleStatusChange(status: GuardRuntimeStatus, configuration: GuardConfiguration) {
-    guard AppPreferences.notifyOnChange else { return }
-
+  func handleStatusChange(status: GuardRuntimeStatus, configuration _: GuardConfiguration) {
     let override = status.override ?? "none"
-    let activeIndex = status.activeRuleIndex
-    let percent = status.fanSpeedPercent
+    guard let event = tracker.transition(
+      activeRuleIndex: status.activeRuleIndex,
+      fanSpeedPercent: status.fanSpeedPercent,
+      override: override
+    ), AppPreferences.notifyOnChange else { return }
 
-    if !hasBaseline {
-      seedBaseline(from: status)
-      return
-    }
-
-    defer {
-      previousActiveRuleIndex = activeIndex
-      previousFanSpeedPercent = percent
-      previousOverride = override
-    }
-
-    if override == "max", previousOverride != "max" {
+    switch event {
+    case .manualMaximumEnabled:
       post(
+        identifier: StatusNotificationIdentifier(kind: event),
         title: "手动全速已启用",
         body: "风扇已加速至 100%，过热保护规则仍然有效。"
       )
-      return
-    }
-
-    if previousOverride == "max", override != "max" {
-      post(title: "手动全速已结束", body: "已恢复自动控制。")
-    }
-
-    guard let activeIndex, let percent else {
-      if previousFanSpeedPercent != nil {
-        post(title: "温度回落，已恢复自动控制", body: "风扇已交还给 macOS 自动管理。")
-      }
-      return
-    }
-
-    if activeIndex != previousActiveRuleIndex || percent != previousFanSpeedPercent {
-      if let previousPercent = previousFanSpeedPercent, percent < previousPercent {
-        guard AppPreferences.notifyOnDeescalation else { return }
-        post(
-          title: "温度回落",
-          body: "降至第 \(activeIndex + 1) 档（\(percent)%）。"
-        )
-      } else if let temperature = status.temperature {
-        post(
-          title: "\(Int(temperature.rounded()))°C 触发第 \(roman(activeIndex + 1)) 档规则",
-          body: "风扇加速至 \(percent)%。"
-        )
-      }
+    case .manualMaximumEnded:
+      post(
+        identifier: StatusNotificationIdentifier(kind: event),
+        title: "手动全速已结束",
+        body: "已恢复自动控制。"
+      )
+    case .recovered:
+      post(
+        identifier: StatusNotificationIdentifier(kind: event),
+        title: "温度回落，已恢复自动控制",
+        body: "风扇已交还给 macOS 自动管理。"
+      )
+    case let .deescalated(activeIndex, percent):
+      guard AppPreferences.notifyOnDeescalation else { return }
+      post(
+        identifier: StatusNotificationIdentifier(kind: event),
+        title: "温度回落",
+        body: "降至第 \(activeIndex + 1) 档（\(percent)%）。"
+      )
+    case let .escalated(activeIndex, percent):
+      guard let temperature = status.temperature else { return }
+      post(
+        identifier: StatusNotificationIdentifier(kind: event),
+        title: "\(Int(temperature.rounded()))°C 触发第 \(roman(activeIndex + 1)) 档规则",
+        body: "风扇加速至 \(percent)%。"
+      )
     }
   }
 
-  private func post(title: String, body: String) {
+  private func post(identifier: StatusNotificationIdentifier, title: String, body: String) {
     let content = UNMutableNotificationContent()
     content.title = title
     content.body = body
     let request = UNNotificationRequest(
-      identifier: UUID().uuidString,
+      identifier: identifier.value,
       content: content,
       trigger: nil
     )

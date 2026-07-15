@@ -20,6 +20,11 @@ public enum GuardEscalation: Equatable, Sendable {
   case recovered
 }
 
+public enum FanControlHardwareAction: Equatable, Sendable {
+  case restoreAutomatic
+  case setPercent(Int)
+}
+
 public struct MultiRuleDecision: Equatable, Sendable {
   public let fanSpeedPercent: Int?
   public let activeRuleIndex: Int?
@@ -116,7 +121,13 @@ public struct MultiRuleGuardState: Sendable {
     fanSpeedPercent = nil
   }
 
-  public mutating func apply(_ configuration: GuardConfiguration) {
+  public var hardwareAction: FanControlHardwareAction {
+    fanSpeedPercent.map(FanControlHardwareAction.setPercent) ?? .restoreAutomatic
+  }
+
+  @discardableResult
+  public mutating func apply(_ configuration: GuardConfiguration) -> Bool {
+    let wasControllingFans = fanSpeedPercent != nil
     let sorted = configuration.sortedRules
     var nextStates: [ThermalGuardState] = []
     nextStates.reserveCapacity(sorted.count)
@@ -134,6 +145,7 @@ public struct MultiRuleGuardState: Sendable {
     ruleConfigs = sorted
     ruleStates = nextStates
     recomputeActiveRule()
+    return wasControllingFans && fanSpeedPercent == nil
   }
 
   public mutating func observe(temperature: Double, at now: Date) -> MultiRuleDecision {

@@ -2,7 +2,7 @@
 # Set app/installer version from VERSION env or current git tag (v-prefix stripped).
 set -euo pipefail
 
-ROOT="${0:A:h}"
+ROOT="${0:A:h:h}"
 APP_PLIST="$ROOT/ThermalFanGuardApp-Info.plist"
 INSTALLER_PLIST="$ROOT/MyFansInstaller-Info.plist"
 
@@ -22,12 +22,11 @@ resolve_version() {
 }
 
 VERSION="$(resolve_version)"
-BUILD_NUMBER="${VERSION//./}"
 
 for plist in "$APP_PLIST" "$INSTALLER_PLIST"; do
   [[ -f "$plist" ]] || continue
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$plist"
 done
 
 print -r -- "$VERSION"

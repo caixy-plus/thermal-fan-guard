@@ -26,6 +26,8 @@ public struct GuardRuntimeStatus: Codable, Sendable {
   public let activeRuleIndex: Int?
   public let fanSpeedPercent: Int?
   public let override: String?
+  public let cpuUsagePercent: Double?
+  public let gpuUsagePercent: Double?
 
   public init(
     timestamp: Date,
@@ -38,7 +40,9 @@ public struct GuardRuntimeStatus: Codable, Sendable {
     fans: [FanSnapshot]? = nil,
     activeRuleIndex: Int? = nil,
     fanSpeedPercent: Int? = nil,
-    override: String? = "none"
+    override: String? = "none",
+    cpuUsagePercent: Double? = nil,
+    gpuUsagePercent: Double? = nil
   ) {
     self.timestamp = timestamp
     self.temperature = temperature
@@ -51,6 +55,8 @@ public struct GuardRuntimeStatus: Codable, Sendable {
     self.activeRuleIndex = activeRuleIndex
     self.fanSpeedPercent = fanSpeedPercent
     self.override = override
+    self.cpuUsagePercent = cpuUsagePercent
+    self.gpuUsagePercent = gpuUsagePercent
   }
 
   public static func load() -> GuardRuntimeStatus? {

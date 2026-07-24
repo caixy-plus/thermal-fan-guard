@@ -350,6 +350,51 @@ import Testing
   #expect(availability.canRestoreAutomatic)
 }
 
+@Test func statusJSONRoundTripPreservesUsage() throws {
+  let status = GuardRuntimeStatus(
+    timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+    temperature: 62.5,
+    sensor: "CPU E-Core",
+    validSensorCount: 12,
+    mode: "maximum",
+    fanStatus: nil,
+    error: nil,
+    fans: nil,
+    activeRuleIndex: 0,
+    fanSpeedPercent: 80,
+    override: "none",
+    cpuUsagePercent: 32.0,
+    gpuUsagePercent: 18.5
+  )
+  let encoder = JSONEncoder()
+  encoder.dateEncodingStrategy = .iso8601
+  let data = try encoder.encode(status)
+  let decoder = JSONDecoder()
+  decoder.dateDecodingStrategy = .iso8601
+  let decoded = try decoder.decode(GuardRuntimeStatus.self, from: data)
+  #expect(decoded.cpuUsagePercent == 32.0)
+  #expect(decoded.gpuUsagePercent == 18.5)
+}
+
+@Test func statusDecodesLegacyJSONWithoutUsage() throws {
+  let json = """
+  {
+    "timestamp":"2024-11-13T12:00:00Z",
+    "temperature":55.0,
+    "sensor":"CPU P-Core",
+    "validSensorCount":8,
+    "mode":"automatic",
+    "override":"none"
+  }
+  """.data(using: .utf8)!
+  let decoder = JSONDecoder()
+  decoder.dateDecodingStrategy = .iso8601
+  let decoded = try decoder.decode(GuardRuntimeStatus.self, from: json)
+  #expect(decoded.temperature == 55.0)
+  #expect(decoded.cpuUsagePercent == nil)
+  #expect(decoded.gpuUsagePercent == nil)
+}
+
 @Test func identicalStatusEventsShareNotificationIdentifier() {
   let first = StatusNotificationIdentifier(kind: .recovered)
   let duplicate = StatusNotificationIdentifier(kind: .recovered)

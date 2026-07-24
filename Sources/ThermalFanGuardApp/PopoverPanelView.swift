@@ -60,34 +60,37 @@ struct PopoverPanelView: View {
   }
 
   private var headerSection: some View {
-    HStack(alignment: .firstTextBaseline) {
-      if let temperature = model.status?.temperature {
-        HStack(alignment: .firstTextBaseline, spacing: 2) {
-          Text(String(format: "%.1f", temperature))
-            .font(.system(size: 34, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .contentTransition(.numericText())
-          Text("°C")
-            .font(.title3)
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline) {
+        if let temperature = model.status?.temperature {
+          HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(String(format: "%.1f", temperature))
+              .font(.system(size: 34, weight: .semibold, design: .rounded))
+              .monospacedDigit()
+              .contentTransition(.numericText())
+            Text("°C")
+              .font(.title3)
+              .foregroundStyle(.secondary)
+          }
+        } else {
+          Text("— °C")
+            .font(.title)
             .foregroundStyle(.secondary)
         }
-      } else {
-        Text("— °C")
-          .font(.title)
-          .foregroundStyle(.secondary)
+        Spacer()
+        badge
       }
-      Spacer()
-      badge
-    }
-    .overlay(alignment: .bottomLeading) {
+
       if let sensor = model.status?.sensor, let count = model.status?.validSensorCount {
         Text("最热传感器: \(sensor) (\(count) 个有效)")
           .font(.caption)
           .foregroundStyle(.secondary)
-          .offset(y: 22)
+          .padding(.top, 4)
       }
+
+      usageCards
+        .padding(.top, 12)
     }
-    .padding(.bottom, 18)
   }
 
   private var badge: some View {
@@ -113,6 +116,47 @@ struct PopoverPanelView: View {
         Capsule().fill(boosted ? Color.orange.opacity(0.18) : pending ? Color.orange.opacity(0.12) : Color.secondary.opacity(0.18))
       }
       .foregroundStyle(boosted || pending ? Color.orange : Color.secondary)
+  }
+
+  private var usageCards: some View {
+    HStack(spacing: 8) {
+      usageCard(title: "CPU", value: model.status?.cpuUsagePercent, tint: .cyan)
+      usageCard(title: "GPU", value: model.status?.gpuUsagePercent, tint: .purple)
+    }
+  }
+
+  private func usageCard(title: String, value: Double?, tint: Color) -> some View {
+    VStack(alignment: .leading, spacing: 4) {
+      Text(title)
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+      HStack(alignment: .firstTextBaseline, spacing: 2) {
+        Text(value.map { String(format: "%.0f", $0) } ?? "—")
+          .font(.system(size: 20, weight: .semibold, design: .rounded))
+          .monospacedDigit()
+        Text("%")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+      GeometryReader { geometry in
+        ZStack(alignment: .leading) {
+          RoundedRectangle(cornerRadius: 2)
+            .fill(.secondary.opacity(0.15))
+          RoundedRectangle(cornerRadius: 2)
+            .fill(tint)
+            .frame(width: geometry.size.width * usageFraction(value))
+        }
+      }
+      .frame(height: 3)
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+  }
+
+  private func usageFraction(_ value: Double?) -> Double {
+    guard let value else { return 0 }
+    return max(0, min(1, value / 100))
   }
 
   private var chartSection: some View {

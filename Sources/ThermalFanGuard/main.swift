@@ -44,6 +44,7 @@ func daemon() throws -> Never {
   }
 
   let hardware = try ThermalHardware()
+  let systemLoad = SystemLoadMonitor()
   let daemonStart = Date()
   var configuration = GuardConfiguration.load()
   var state = MultiRuleGuardState(configuration: configuration)
@@ -150,6 +151,7 @@ func daemon() throws -> Never {
 
       let fans = try hardware.readFans()
       let fanText = try hardware.fanStatus()
+      let load = systemLoad.sample()
       history.append(temperature: reading.maximum, mode: mode, at: now)
       history.flushIfNeeded()
 
@@ -164,7 +166,9 @@ func daemon() throws -> Never {
         fans: fans,
         activeRuleIndex: override.maxOverrideActive ? nil : state.activeRuleIndex,
         fanSpeedPercent: override.maxOverrideActive ? 100 : appliedPercent,
-        override: overrideLabel
+        override: overrideLabel,
+        cpuUsagePercent: load.cpuUsagePercent,
+        gpuUsagePercent: load.gpuUsagePercent
       ).save()
 
       log(
@@ -180,6 +184,7 @@ func daemon() throws -> Never {
     } catch {
       let fans = try? hardware.readFans()
       let fanText = try? hardware.fanStatus()
+      let load = systemLoad.sample()
       history.append(temperature: nil, mode: "error", at: now)
       history.flushIfNeeded()
       GuardRuntimeStatus(
@@ -193,7 +198,9 @@ func daemon() throws -> Never {
         fans: fans,
         activeRuleIndex: state.activeRuleIndex,
         fanSpeedPercent: state.fanSpeedPercent,
-        override: "none"
+        override: "none",
+        cpuUsagePercent: load.cpuUsagePercent,
+        gpuUsagePercent: load.gpuUsagePercent
       ).save()
       log("ERROR sample/control failed: \(error)")
     }

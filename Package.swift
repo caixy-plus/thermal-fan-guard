@@ -35,5 +35,9 @@ let package = Package(
       name: "ThermalFanGuardTests",
       dependencies: ["ThermalFanGuardCore"]
     ),
+    .testTarget(
+      name: "ThermalFanGuardAppTests",
+      dependencies: ["ThermalFanGuardApp"]
+    ),
   ]
 )

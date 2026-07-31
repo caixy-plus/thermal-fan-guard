@@ -36,6 +36,7 @@ struct SettingsWindowConfigurator: NSViewRepresentable {
   @MainActor
   final class Coordinator {
     private weak var configuredWindow: NSWindow?
+    private var mouseMonitor: MouseMonitorToken?
 
     func apply(to window: NSWindow?, width: CGFloat, height: CGFloat) {
       guard let window else { return }
@@ -47,11 +48,50 @@ struct SettingsWindowConfigurator: NSViewRepresentable {
       window.center()
       window.initialFirstResponder = nil
       window.makeFirstResponder(nil)
+      installMouseMonitor(for: window)
       Task { @MainActor [weak self, weak window] in
         await Task.yield()
         guard self?.configuredWindow === window else { return }
         window?.makeFirstResponder(nil)
       }
+    }
+
+    private func installMouseMonitor(for window: NSWindow) {
+      mouseMonitor = nil
+      let monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak window] event in
+        guard let window, event.window === window else { return event }
+        let clickedView = window.contentView?.hitTest(event.locationInWindow)
+        if !Self.isTextInput(clickedView) {
+          window.makeFirstResponder(nil)
+        }
+        return event
+      }
+      if let monitor {
+        mouseMonitor = MouseMonitorToken(monitor)
+      }
+    }
+
+    private static func isTextInput(_ view: NSView?) -> Bool {
+      var candidate = view
+      while let current = candidate {
+        if current is NSTextField || current is NSTextView {
+          return true
+        }
+        candidate = current.superview
+      }
+      return false
+    }
+  }
+
+  private final class MouseMonitorToken: @unchecked Sendable {
+    private let monitor: Any
+
+    init(_ monitor: Any) {
+      self.monitor = monitor
+    }
+
+    deinit {
+      NSEvent.removeMonitor(monitor)
     }
   }
 
